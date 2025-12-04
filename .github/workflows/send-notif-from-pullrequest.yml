@@ -23,22 +23,46 @@ jobs:
             exit 0
           fi
           
+          # Get PR details
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          PR_BODY="${{ github.event.pull_request.body }}"
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          REPO="${{ github.repository }}"
+          AUTHOR="${{ github.event.pull_request.user.login }}"
+          HEAD_REF="${{ github.event.pull_request.head.ref }}"
+          BASE_REF="${{ github.event.pull_request.base.ref }}"
+          PR_URL="${{ github.event.pull_request.html_url }}"
+          
+          # Escape special characters for Markdown (escape backslash first, then other chars)
+          PR_TITLE_ESC=$(echo "$PR_TITLE" | sed 's/\\/\\\\/g' | sed 's/[_*[\]()~`>#+=|{}.!-]/\\&/g')
+          PR_BODY_ESC=$(echo "$PR_BODY" | sed 's/\\/\\\\/g' | sed 's/[_*[\]()~`>#+=|{}.!-]/\\&/g' | head -c 1000)
+          
           # Add channel link if provided
           CHANNEL_INFO=""
           if [ -n "$TELEGRAM_CHANNEL_LINK" ]; then
-            CHANNEL_INFO="\n📢 *Channel:* $TELEGRAM_CHANNEL_LINK"
+            CHANNEL_INFO=$'\n'"📢 *Channel:* $TELEGRAM_CHANNEL_LINK"
           fi
           
-          # Build PR notification message
-          PR_TITLE="${{ github.event.pull_request.title }}"
-          PR_BODY="${{ github.event.pull_request.body }}"
-          MESSAGE="📝 *New Pull Request*\\n\\n📦 *Repository:* \`${{ github.repository }}\`\\n🔢 *PR Number:* #${{ github.event.pull_request.number }}\\n📋 *Title:* ${PR_TITLE}\\n👤 *Author:* ${{ github.event.pull_request.user.login }}\\n🌿 *Branch:* \`${{ github.event.pull_request.head.ref }}\` → \`${{ github.event.pull_request.base.ref }}\`\\n📝 *Description:*\\n${PR_BODY}${CHANNEL_INFO}\\n\\n🔗 *View PR:* ${{ github.event.pull_request.html_url }}"
+          # Build message with proper newlines
+          MESSAGE="📝 *New Pull Request*"$'\n\n'"📦 *Repository:* \`${REPO}\`"$'\n'"🔢 *PR Number:* #${PR_NUMBER}"$'\n'"📋 *Title:* ${PR_TITLE_ESC}"$'\n'"👤 *Author:* ${AUTHOR}"$'\n'"🌿 *Branch:* \`${HEAD_REF}\` → \`${BASE_REF}\`"$'\n'"📝 *Description:*"$'\n'"${PR_BODY_ESC}${CHANNEL_INFO}"$'\n\n'"🔗 *View PR:* ${PR_URL}"
           
-          # Send message to Telegram
-          curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
+          # Send message to Telegram and capture response
+          echo "Sending notification to Telegram..."
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
             -d chat_id="$TELEGRAM_CHAT_ID" \
-            -d text="$MESSAGE" \
+            --data-urlencode "text=$MESSAGE" \
             -d parse_mode="Markdown" \
-            -d disable_web_page_preview=true
+            -d disable_web_page_preview=true)
           
-          echo "📱 Telegram PR notification sent"
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+          
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "✅ Telegram PR notification sent successfully"
+            echo "Response: $BODY"
+          else
+            echo "❌ Failed to send Telegram notification"
+            echo "HTTP Code: $HTTP_CODE"
+            echo "Response: $BODY"
+            exit 1
+          fi
